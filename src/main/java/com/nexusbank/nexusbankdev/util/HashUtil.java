@@ -11,12 +11,14 @@ public class HashUtil {
     private static final BCryptPasswordEncoder BCRYPT = new BCryptPasswordEncoder();
 
     public static String hashPassword(String rawPassword) {
-        if (rawPassword == null) return null;
+        if (rawPassword == null)
+            return null;
         return BCRYPT.encode(rawPassword);
     }
 
     public static boolean checkPassword(String rawPassword, String storedHash) {
-        if (rawPassword == null || storedHash == null) return false;
+        if (rawPassword == null || storedHash == null)
+            return false;
         // Supports BCrypt standard hashes
         if (storedHash.startsWith("$2a$") || storedHash.startsWith("$2b$") || storedHash.startsWith("$2y$")) {
             return BCRYPT.matches(rawPassword, storedHash);
