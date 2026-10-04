@@ -1,16 +1,22 @@
 package com.nexusbank.nexusbankdev.service;
 
-import com.nexusbank.nexusbankdev.model.LedgerBlock;
-import com.nexusbank.nexusbankdev.model.Transaction;
-import com.nexusbank.nexusbankdev.util.HashUtil;
+import com.nexusbank.nexusbankdev.model.Account;
+import com.nexusbank.nexusbankdev.model.AuditLog;
+import com.nexusbank.nexusbankdev.model.Card;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.nexusbank.nexusbankdev.model.LedgerBlock;
+import com.nexusbank.nexusbankdev.model.Transaction;
+import com.nexusbank.nexusbankdev.util.HashUtil;
 
+import java.time.Instant;
+import java.util.Calendar;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 
 @Service
 public class BankingService {
@@ -116,5 +122,130 @@ public class BankingService {
         response.put("valid", valid);
         response.put("message", valid ? "All ledger blocks verified and tamper-free." : "Chain integrity violation detected.");
         return response;
+    }
+
+    public List<Account> getCustomerAccounts(Long customerId) {
+        return em.createQuery("SELECT a FROM Account a WHERE a.customerId = :cId", Account.class)
+                .setParameter("cId", customerId)
+                .getResultList();
+    }
+
+    public Account getAccount(Long accountId) {
+        Account acc = em.find(Account.class, accountId);
+        if (acc == null) {
+            throw new RuntimeException("Account not found with id: " + accountId);
+        }
+        return acc;
+    }
+
+    @Transactional
+    public Account openAccount(Account account) {
+        if (account.getAccountNumber() == null || account.getAccountNumber().isEmpty()) {
+            account.setAccountNumber("NXB-" + String.format("%03d", new Random().nextInt(999)) + "-" + Calendar.getInstance().get(Calendar.YEAR) + "-" + String.format("%04d", new Random().nextInt(9999)));
+        }
+        account.setStatus("ACTIVE");
+        account.setOpenedDate(Instant.now().toString());
+        account.setTimestamp(Instant.now().toString());
+        if (account.getBalance() == null) {
+            account.setBalance(0.0);
+        }
+        em.persist(account);
+        return account;
+    }
+
+    @Transactional
+    public void freezeAccount(Long accountId) {
+        freezeAccount(accountId, null);
+    }
+
+    @Transactional
+    public void freezeAccount(Long accountId, String employeeRole) {
+        if (employeeRole != null && !employeeRole.isEmpty()) {
+            if (!"OPERATIONS_MANAGER".equals(employeeRole) &&
+                    !"IT_SECURITY_OFFICER".equals(employeeRole) &&
+                    !"CUSTOMER_SERVICE_MANAGER".equals(employeeRole) &&
+                    !"SENIOR_BANK_ADMINISTRATOR".equals(employeeRole)) {
+                throw new RuntimeException("Unauthorized: Role " + employeeRole + " is not authorized to freeze accounts");
+            }
+        }
+        Account acc = getAccount(accountId);
+        acc.setStatus("FROZEN");
+        em.merge(acc);
+
+        AuditLog log = new AuditLog(0L, "ACCOUNT_FROZEN", "Account " + acc.getAccountNumber() + " (ID: " + accountId + ") has been frozen");
+        em.persist(log);
+    }
+
+    @Transactional
+    public void unfreezeAccount(Long accountId) {
+        unfreezeAccount(accountId, null);
+    }
+
+    @Transactional
+    public void unfreezeAccount(Long accountId, String employeeRole) {
+        if (employeeRole != null && !employeeRole.isEmpty()) {
+            if (!"OPERATIONS_MANAGER".equals(employeeRole) &&
+                    !"IT_SECURITY_OFFICER".equals(employeeRole) &&
+                    !"CUSTOMER_SERVICE_MANAGER".equals(employeeRole) &&
+                    !"SENIOR_BANK_ADMINISTRATOR".equals(employeeRole)) {
+                throw new RuntimeException("Unauthorized: Role " + employeeRole + " is not authorized to unfreeze accounts");
+            }
+        }
+        Account acc = getAccount(accountId);
+        acc.setStatus("ACTIVE");
+        em.merge(acc);
+
+        AuditLog log = new AuditLog(0L, "ACCOUNT_UNFROZEN", "Account " + acc.getAccountNumber() + " (ID: " + accountId + ") has been unfrozen");
+        em.persist(log);
+    }
+
+    @Transactional
+    public void toggleCardFreeze(Long cardId, String employeeRole) {
+        if (employeeRole != null && !employeeRole.isEmpty()) {
+            if (!"OPERATIONS_MANAGER".equals(employeeRole) &&
+                    !"IT_SECURITY_OFFICER".equals(employeeRole) &&
+                    !"CUSTOMER_SERVICE_MANAGER".equals(employeeRole) &&
+                    !"SENIOR_BANK_ADMINISTRATOR".equals(employeeRole)) {
+                throw new RuntimeException("Unauthorized: Role " + employeeRole + " is not authorized to freeze/unfreeze cards");
+            }
+        }
+        Card card = em.find(Card.class, cardId);
+        if (card != null) {
+            card.setStatus("FROZEN".equalsIgnoreCase(card.getStatus()) ? "ACTIVE" : "FROZEN");
+            em.merge(card);
+        }
+    }
+
+    public List<Card> getCustomerCards(Long customerId) {
+        return em.createQuery("SELECT c FROM Card c WHERE c.customerId = :cId", Card.class)
+                .setParameter("cId", customerId)
+                .getResultList();
+    }
+
+    @Transactional
+    public Card createCard(Card card) {
+        if (card.getMaskedCardNumber() == null) {
+            card.setMaskedCardNumber("4532-XXXX-XXXX-" + String.format("%04d", new Random().nextInt(9999)));
+        }
+        card.setStatus("ACTIVE");
+        card.setTimestamp(Instant.now().toString());
+        em.persist(card);
+        return card;
+    }
+
+    public Map<String, Object> getDashboardSummary() {
+        Long totalTx = (Long) em.createQuery("SELECT COUNT(t) FROM Transaction t").getSingleResult();
+        Long successTx = (Long) em.createQuery("SELECT COUNT(t) FROM Transaction t WHERE t.status = 'SUCCESS'").getSingleResult();
+        Long failedTx = (Long) em.createQuery("SELECT COUNT(t) FROM Transaction t WHERE t.status = 'FAILED'").getSingleResult();
+        Double totalVal = (Double) em.createQuery("SELECT COALESCE(SUM(t.amount), 0.0) FROM Transaction t WHERE t.status = 'SUCCESS'").getSingleResult();
+        Long totalAcc = (Long) em.createQuery("SELECT COUNT(a) FROM Account a").getSingleResult();
+
+        Map<String, Object> summary = new HashMap<>();
+        summary.put("totalTransactions", totalTx);
+        summary.put("successCount", successTx);
+        summary.put("failedCount", failedTx);
+        summary.put("totalValue", totalVal);
+        summary.put("totalAccounts", totalAcc);
+        return summary;
     }
 }
