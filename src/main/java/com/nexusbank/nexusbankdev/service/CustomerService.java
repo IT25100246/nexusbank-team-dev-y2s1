@@ -7,17 +7,24 @@ import com.nexusbank.nexusbankdev.model.KycApplication;
 import com.nexusbank.nexusbankdev.model.KycDocument;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
+import java.time.LocalDateTime;
+import java.util.Map;
 
 @Service
 public class CustomerService {
 
     @PersistenceContext
     private EntityManager em;
+
+    @Autowired
+    private CloudinaryService cloudinaryService;
 
     public List<Customer> searchCustomers(String keyword) {
         if (keyword == null || keyword.trim().isEmpty()) {
@@ -142,4 +149,75 @@ public class CustomerService {
         AuditLog log = new AuditLog(employeeId, "KYC_REJECTED", "KYC Application #" + applicationId + " rejected for Customer #" + app.getCustomerId());
         em.persist(log);
     }
+
+    public List<KycDocument> getKycDocuments(Long applicationId) {
+        return em.createQuery("SELECT d FROM KycDocument d WHERE d.applicationId = :appId", KycDocument.class)
+                .setParameter("appId", applicationId)
+                .getResultList();
+    }
+
+    @Transactional
+    public KycDocument uploadKycDocument(Long applicationId, String docType, MultipartFile file) {
+        KycApplication app = em.find(KycApplication.class, applicationId);
+        if (app == null) {
+            throw new RuntimeException("KYC application not found with id: " + applicationId);
+        }
+
+        try {
+            Map<String, String> uploadResult =
+                    cloudinaryService.uploadMultipart(file, "nexusbank/kyc/" + applicationId);
+
+            String url = uploadResult.get("url");
+            String publicId = uploadResult.get("publicId");
+
+            KycDocument doc = new KycDocument();
+            doc.setApplicationId(applicationId);
+            doc.setDocType(docType != null ? docType : "OTHER");
+            doc.setFileName(file.getOriginalFilename());
+            doc.setCloudinaryUrl(url);
+            doc.setCloudinaryPublicId(publicId);
+            doc.setValidationStatus("PENDING");
+            doc.setUploadedAt(LocalDateTime.now());
+            doc.setUploadDate(Instant.now().toString());
+            doc.setTimestamp(Instant.now().toString());
+
+            em.persist(doc);
+            return doc;
+
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to upload KYC document to Cloudinary: " + e.getMessage(), e);
+        }
+    }
+
+        @Transactional
+        public KycDocument uploadKycDocumentBytes(Long applicationId, String docType,
+        byte[] fileBytes, String originalFilename) {
+            KycApplication app = em.find(KycApplication.class, applicationId);
+            if (app == null) {
+                throw new RuntimeException("KYC application not found with id: " + applicationId);
+            }
+
+            try {
+                Map<String, String> uploadResult = cloudinaryService.upload(
+                        fileBytes, originalFilename, "nexusbank/kyc/" + applicationId);
+
+                KycDocument doc = new KycDocument();
+                doc.setApplicationId(applicationId);
+                doc.setDocType(docType != null ? docType : "OTHER");
+                doc.setFileName(originalFilename);
+                doc.setCloudinaryUrl(uploadResult.get("url"));
+                doc.setCloudinaryPublicId(uploadResult.get("publicId"));
+                doc.setValidationStatus("PENDING");
+                doc.setUploadedAt(LocalDateTime.now());
+                doc.setUploadDate(Instant.now().toString());
+                doc.setTimestamp(Instant.now().toString());
+
+                em.persist(doc);
+                return doc;
+
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to upload KYC document to Cloudinary: " + e.getMessage(), e);
+            }
+        }
+
 }

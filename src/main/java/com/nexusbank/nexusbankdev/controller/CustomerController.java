@@ -6,6 +6,7 @@ import com.nexusbank.nexusbankdev.service.CustomerService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import com.nexusbank.nexusbankdev.model.KycDocument;
 
 import java.util.List;
 import java.util.Map;
@@ -55,5 +56,19 @@ public class CustomerController {
         Long employeeId = authEmployeeId != null ? authEmployeeId : 0L;
         customerService.rejectKyc(appId, employeeId);
         return ResponseEntity.ok().build();
+    }
+
+    @GetMapping("/kyc/{appId}/documents")
+    public ResponseEntity<List<KycDocument>> getKycDocuments(@PathVariable("appId") Long appId) {
+        return ResponseEntity.ok(customerService.getKycDocuments(appId));
+    }
+
+    @PostMapping(value = "/kyc/{appId}/documents/upload", consumes = { "multipart/form-data" })
+    public ResponseEntity<KycDocument> uploadKycDocument(
+            @PathVariable("appId") Long appId,
+            @RequestParam(value = "docType", defaultValue = "NATIONAL_ID") String docType,
+            @RequestParam("file") org.springframework.web.multipart.MultipartFile file) {
+
+        return ResponseEntity.ok(customerService.uploadKycDocument(appId, docType, file));
     }
 }

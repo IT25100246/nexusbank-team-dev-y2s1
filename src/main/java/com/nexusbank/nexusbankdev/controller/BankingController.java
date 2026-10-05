@@ -6,6 +6,8 @@ import com.nexusbank.nexusbankdev.service.BankingService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import com.nexusbank.nexusbankdev.model.Biller;
+import com.nexusbank.nexusbankdev.model.Transaction;
 
 import java.util.List;
 import java.util.Map;
@@ -79,5 +81,25 @@ public class BankingController {
     @PostMapping("/cards")
     public ResponseEntity<Card> createCard(@RequestBody Card card) {
         return ResponseEntity.ok(bankingService.createCard(card));
+    }
+
+    @PostMapping("/transactions/bill-payment")
+    public ResponseEntity<Transaction> payUtilityBill(@RequestBody Map<String, Object> body) {
+        Long sourceAccountId = Long.valueOf(body.get("sourceAccountId").toString());
+        Long billerId = Long.valueOf(body.get("billerId").toString());
+        Double amount = Double.valueOf(body.get("amount").toString());
+        String referenceNo = body.get("referenceNo") != null ? body.get("referenceNo").toString() : null;
+        return ResponseEntity.ok(bankingService.payUtilityBill(sourceAccountId, billerId, amount, referenceNo));
+    }
+
+    // Billers
+    @GetMapping("/billers/all")
+    public ResponseEntity<List<Biller>> getBillers() {
+        return ResponseEntity.ok(bankingService.getBillers());
+    }
+
+    @PostMapping("/billers")
+    public ResponseEntity<Biller> addBiller(@RequestBody Biller biller) {
+        return ResponseEntity.ok(bankingService.addBiller(biller));
     }
 }

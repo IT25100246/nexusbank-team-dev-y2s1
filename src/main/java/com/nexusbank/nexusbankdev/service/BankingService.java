@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.nexusbank.nexusbankdev.model.LedgerBlock;
 import com.nexusbank.nexusbankdev.model.Transaction;
 import com.nexusbank.nexusbankdev.util.HashUtil;
+import com.nexusbank.nexusbankdev.model.Biller;
 
 import java.time.Instant;
 import java.util.Calendar;
@@ -17,6 +18,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.time.LocalDateTime;
 
 @Service
 public class BankingService {
@@ -247,5 +249,65 @@ public class BankingService {
         summary.put("totalValue", totalVal);
         summary.put("totalAccounts", totalAcc);
         return summary;
+    }
+
+    @Transactional
+    public Transaction payUtilityBill(Long sourceAccountId, Long billerId, Double amount, String referenceNo) {
+        if (amount == null || amount <= 0) {
+            throw new RuntimeException("Payment amount must be greater than zero");
+        }
+
+        Account source = getAccount(sourceAccountId);
+        if ("FROZEN".equalsIgnoreCase(source.getStatus())) {
+            throw new RuntimeException("Source account is frozen.");
+        }
+        if (source.getBalance() < amount) {
+            throw new RuntimeException("Insufficient funds. Available balance: " + source.getBalance());
+        }
+
+        source.setBalance(source.getBalance() - amount);
+        em.merge(source);
+
+        Transaction tx = new Transaction();
+        tx.setType("UTILITY_BILL_PAYMENT");
+        tx.setSourceAccountId(sourceAccountId);
+        tx.setDestinationAccountId(0L);
+        tx.setAmount(amount);
+        tx.setStatus("SUCCESS");
+        tx.setBillerId(billerId);
+        tx.setLoanId(0L);
+        tx.setReferenceNo(referenceNo != null ? referenceNo : "BILL-" + System.currentTimeMillis());
+        tx.setReceiptHash(HashUtil.sha256("RECEIPT:" + tx.getReferenceNo() + ":" + billerId + ":" + amount));
+        tx.setTimestamp(Instant.now().toString());
+
+        em.persist(tx);
+
+        appendLedgerBlock(tx);
+        return tx;
+    }
+
+    public List<Biller> getBillers() {
+        return em.createQuery("SELECT b FROM Biller b ORDER BY b.billerId ASC", Biller.class)
+                .getResultList();
+    }
+
+    @Transactional
+    public Biller addBiller(Biller biller) {
+        biller.setTimestamp(Instant.now().toString());
+
+        if (biller.getPublished() == null) {
+            biller.setPublished(true);
+        }
+
+        em.persist(biller);
+
+        AuditLog log = new AuditLog(
+                biller.getCreatedByEmployeeId() != null ? biller.getCreatedByEmployeeId() : 0L,
+                "BILLER_ADDED",
+                "New biller added: " + biller.getName()
+        );
+
+        em.persist(log);
+        return biller;
     }
 }
