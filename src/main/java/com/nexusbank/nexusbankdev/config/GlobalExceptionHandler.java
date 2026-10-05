@@ -14,7 +14,9 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, String>> handleException(Exception ex) {
         Map<String, String> error = new HashMap<>();
-        error.put("message", ex.getMessage() != null ? ex.getMessage() : "An unexpected error occurred");
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
+        String msg = ex.getMessage();
+        error.put("message", msg != null ? msg : "An unexpected error occurred");
+        HttpStatus status = (msg != null && msg.startsWith("Unauthorized")) ? HttpStatus.FORBIDDEN : HttpStatus.BAD_REQUEST;
+        return ResponseEntity.status(status).body(error);
     }
 }
