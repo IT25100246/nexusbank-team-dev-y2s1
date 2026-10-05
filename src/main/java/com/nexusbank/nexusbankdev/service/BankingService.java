@@ -18,7 +18,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
-import java.time.LocalDateTime;
 
 @Service
 public class BankingService {
@@ -279,7 +278,6 @@ public class BankingService {
         tx.setReferenceNo(referenceNo != null ? referenceNo : "BILL-" + System.currentTimeMillis());
         tx.setReceiptHash(HashUtil.sha256("RECEIPT:" + tx.getReferenceNo() + ":" + billerId + ":" + amount));
         tx.setTimestamp(Instant.now().toString());
-
         em.persist(tx);
 
         appendLedgerBlock(tx);
@@ -294,20 +292,103 @@ public class BankingService {
     @Transactional
     public Biller addBiller(Biller biller) {
         biller.setTimestamp(Instant.now().toString());
-
         if (biller.getPublished() == null) {
             biller.setPublished(true);
         }
-
         em.persist(biller);
 
-        AuditLog log = new AuditLog(
-                biller.getCreatedByEmployeeId() != null ? biller.getCreatedByEmployeeId() : 0L,
-                "BILLER_ADDED",
-                "New biller added: " + biller.getName()
-        );
-
+        AuditLog log = new AuditLog(biller.getCreatedByEmployeeId() != null ? biller.getCreatedByEmployeeId() : 0L, "BILLER_ADDED", "New biller added: " + biller.getName());
         em.persist(log);
         return biller;
     }
+
+    public List<Transaction> getTransactions(Long accountId) {
+        return em.createQuery("SELECT t FROM Transaction t WHERE t.sourceAccountId = :accId OR t.destinationAccountId = :accId ORDER BY t.transactionId DESC", Transaction.class)
+                .setParameter("accId", accountId)
+                .getResultList();
+    }
+
+    @Transactional
+    public Transaction transferP2P(Long sourceAccountId, Long destinationAccountId, Double amount, String referenceNo) {
+        if (amount == null || amount <= 0) {
+            throw new RuntimeException("Transfer amount must be greater than zero");
+        }
+
+        Account source = getAccount(sourceAccountId);
+        Account dest = getAccount(destinationAccountId);
+
+        if ("FROZEN".equalsIgnoreCase(source.getStatus())) {
+            throw new RuntimeException("Source account is frozen. Transactions are not permitted.");
+        }
+        if ("FROZEN".equalsIgnoreCase(dest.getStatus())) {
+            throw new RuntimeException("Destination account is frozen. Transactions are not permitted.");
+        }
+        if (source.getBalance() < amount) {
+            throw new RuntimeException("Insufficient funds. Available balance: " + source.getBalance());
+        }
+
+        // ACID transfer
+        source.setBalance(source.getBalance() - amount);
+        dest.setBalance(dest.getBalance() + amount);
+        em.merge(source);
+        em.merge(dest);
+
+        // Record transaction
+        Transaction tx = new Transaction();
+        tx.setType("P2P_TRANSFER");
+        tx.setSourceAccountId(sourceAccountId);
+        tx.setDestinationAccountId(destinationAccountId);
+        tx.setAmount(amount);
+        tx.setStatus("SUCCESS");
+        tx.setDestinationBank("NexusBank");
+        tx.setRoutingCode("NXB001");
+        tx.setBillerId(0L);
+        tx.setLoanId(0L);
+        tx.setReferenceNo(referenceNo != null ? referenceNo : "P2P-" + System.currentTimeMillis());
+        tx.setReceiptHash(HashUtil.sha256(tx.getReferenceNo() + ":" + amount + ":" + Instant.now()));
+        tx.setTimestamp(Instant.now().toString());
+        em.persist(tx);
+
+        // Append block to SHA-256 Ledger
+        appendLedgerBlock(tx);
+
+        return tx;
+    }
+
+    @Transactional
+    public Transaction transferExternal(Long sourceAccountId, Double amount, String destinationBank, String routingCode, String referenceNo) {
+        if (amount == null || amount <= 0) {
+            throw new RuntimeException("Transfer amount must be greater than zero");
+        }
+
+        Account source = getAccount(sourceAccountId);
+        if ("FROZEN".equalsIgnoreCase(source.getStatus())) {
+            throw new RuntimeException("Source account is frozen.");
+        }
+        if (source.getBalance() < amount) {
+            throw new RuntimeException("Insufficient funds. Available balance: " + source.getBalance());
+        }
+
+        source.setBalance(source.getBalance() - amount);
+        em.merge(source);
+
+        Transaction tx = new Transaction();
+        tx.setType("EXTERNAL_TRANSFER");
+        tx.setSourceAccountId(sourceAccountId);
+        tx.setDestinationAccountId(0L);
+        tx.setAmount(amount);
+        tx.setStatus("SUCCESS");
+        tx.setDestinationBank(destinationBank != null ? destinationBank : "External Bank");
+        tx.setRoutingCode(routingCode != null ? routingCode : "EXT001");
+        tx.setBillerId(0L);
+        tx.setLoanId(0L);
+        tx.setReferenceNo(referenceNo != null ? referenceNo : "EXT-" + System.currentTimeMillis());
+        tx.setReceiptHash(HashUtil.sha256(tx.getReferenceNo() + ":" + amount + ":" + Instant.now()));
+        tx.setTimestamp(Instant.now().toString());
+        em.persist(tx);
+
+        appendLedgerBlock(tx);
+        return tx;
+    }
+
 }

@@ -20,10 +20,14 @@ public class BankingController {
     @Autowired
     private BankingService bankingService;
 
+
+
     @GetMapping("/transactions/{id}/verify")
     public ResponseEntity<Map<String, Object>> verifyTransaction(@PathVariable("id") Long id) {
         return ResponseEntity.ok(bankingService.verifyTransaction(id));
     }
+
+
 
     // Ledger Audit
     @GetMapping("/ledger/verify-chain")
@@ -83,6 +87,7 @@ public class BankingController {
         return ResponseEntity.ok(bankingService.createCard(card));
     }
 
+
     @PostMapping("/transactions/bill-payment")
     public ResponseEntity<Transaction> payUtilityBill(@RequestBody Map<String, Object> body) {
         Long sourceAccountId = Long.valueOf(body.get("sourceAccountId").toString());
@@ -101,5 +106,31 @@ public class BankingController {
     @PostMapping("/billers")
     public ResponseEntity<Biller> addBiller(@RequestBody Biller biller) {
         return ResponseEntity.ok(bankingService.addBiller(biller));
+    }
+    // Transactions
+    @GetMapping("/transactions/account/{accountId}")
+    public ResponseEntity<List<Transaction>> getTransactions(@PathVariable("accountId") Long accountId) {
+        return ResponseEntity.ok(bankingService.getTransactions(accountId));
+    }
+
+    @PostMapping("/transactions/transfer")
+    public ResponseEntity<Transaction> transferP2P(@RequestBody Map<String, Object> body) {
+        Long sourceAccountId = Long.valueOf(body.get("sourceAccountId").toString());
+        Long destinationAccountId = Long.valueOf(body.get("destinationAccountId").toString());
+        Double amount = Double.valueOf(body.get("amount").toString());
+        String referenceNo = body.get("referenceNo") != null ? body.get("referenceNo").toString() : null;
+        return ResponseEntity
+                .ok(bankingService.transferP2P(sourceAccountId, destinationAccountId, amount, referenceNo));
+    }
+
+    @PostMapping("/transactions/external-transfer")
+    public ResponseEntity<Transaction> transferExternal(@RequestBody Map<String, Object> body) {
+        Long sourceAccountId = Long.valueOf(body.get("sourceAccountId").toString());
+        Double amount = Double.valueOf(body.get("amount").toString());
+        String destBank = body.get("destinationBank") != null ? body.get("destinationBank").toString() : null;
+        String routingCode = body.get("routingCode") != null ? body.get("routingCode").toString() : null;
+        String referenceNo = body.get("referenceNo") != null ? body.get("referenceNo").toString() : null;
+        return ResponseEntity
+                .ok(bankingService.transferExternal(sourceAccountId, amount, destBank, routingCode, referenceNo));
     }
 }
